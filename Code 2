@@ -1,0 +1,115 @@
+#include <iostream>
+#include <vector>
+#include <random>
+#include <chrono>
+#include <fstream>
+#include <pthread.h>
+
+struct ThreadData {
+    int threadId;
+    int numThreads;
+    int matrixSize;
+    const std::vector<std::vector<int>>* A;
+    const std::vector<std::vector<int>>* B;
+    std::vector<std::vector<int>>* C;
+};
+
+// Function to generate a random matrix of size N x N
+std::vector<std::vector<int>> generateRandomMatrix(int N) {
+    std::vector<std::vector<int>> matrix(N, std::vector<int>(N));
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    std::uniform_int_distribution<> dis(1, 100);
+    
+    for (int i = 0; i < N; i++) {
+        for (int j = 0; j < N; j++) {
+            matrix[i][j] = dis(gen);
+        }
+    }
+    return matrix;
+}
+
+// Thread function for matrix multiplication
+void* multiplyMatricesThread(void* arg) {
+    ThreadData* data = static_cast<ThreadData*>(arg);
+    int N = data->matrixSize;
+    int start_row = (data->threadId * N) / data->numThreads;
+    int end_row = ((data->threadId + 1) * N) / data->numThreads;
+    
+    for (int i = start_row; i < end_row; i++) {
+        for (int j = 0; j < N; j++) {
+            (*data->C)[i][j] = 0;
+            for (int k = 0; k < N; k++) {
+                (*data->C)[i][j] += (*data->A)[i][k] * (*data->B)[k][j];
+            }
+        }
+    }
+    
+    pthread_exit(NULL);
+}
+
+// Function to write matrix to file
+void writeMatrixToFile(const std::vector<std::vector<int>>& matrix, const std::string& filename) {
+    std::ofstream outFile(filename);
+    if (!outFile) {
+        std::cerr << "Error opening file: " << filename << std::endl;
+        return;
+    }
+    
+    int N = matrix.size();
+    for (int i = 0; i < N; i++) {
+        for (int j = 0; j < N; j++) {
+            outFile << matrix[i][j] << " ";
+        }
+        outFile << "\n";
+    }
+    outFile.close();
+}
+
+int main(int argc, char* argv[]) {
+    // Matrix size
+    int N = 1000;
+    
+    // Default number of threads
+    int numThreads = 4;
+    
+    // If a command line argument is provided, use it as the number of threads
+    if (argc > 1) {
+        numThreads = std::stoi(argv[1]);
+    }
+    
+    // Generate random matrices
+    std::vector<std::vector<int>> A = generateRandomMatrix(N);
+    std::vector<std::vector<int>> B = generateRandomMatrix(N);
+    std::vector<std::vector<int>> C(N, std::vector<int>(N, 0));
+    
+    // Create thread data
+    std::vector<ThreadData> threadData(numThreads);
+    std::vector<pthread_t> threads(numThreads);
+    
+    // Measure execution time for matrix multiplication
+    auto start = std::chrono::high_resolution_clock::now();
+    
+    // Create and launch threads
+    for (int i = 0; i < numThreads; i++) {
+        threadData[i] = {i, numThreads, N, &A, &B, &C};
+        pthread_create(&threads[i], NULL, multiplyMatricesThread, &threadData[i]);
+    }
+    
+    // Join threads
+    for (int i = 0; i < numThreads; i++) {
+        pthread_join(threads[i], NULL);
+    }
+    
+    auto end = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double> duration = end - start;
+    
+    std::cout << "Parallel matrix multiplication of size " << N << "x" << N 
+              << " with " << numThreads << " threads completed in " 
+              << duration.count() << " seconds." << std::endl;
+    
+    // Write result to file
+    writeMatrixToFile(C, "parallel_result.txt");
+    
+    return 0;
+}
